@@ -56,5 +56,12 @@ export type ScoreResponse = ScoreComputation & {
     walletSignature?: string; // Cryptographic proof of wallet ownership
     walletAddress?: string;   // Verified wallet address
     verificationHash?: string;  // NEW: Hash for two-token verification
+    zkProof?: {
+      scoreHash: string;
+      bucketCommitment: string;
+      documentProof: string;
+      timestamp: number;
+      proofServer: string;
+    };
   };
 };

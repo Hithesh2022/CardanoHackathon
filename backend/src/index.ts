@@ -7,6 +7,7 @@ import { scoreRequestSchema } from './schemas/scoreRequest.js';
 import { scoreEngine } from './services/scoreEngine.js';
 import { midnightBridge } from './services/midnightBridge.js';
 import { masumiClient } from './services/masumiClient.js';
+import { DustPaymentService } from './services/dustPaymentService.js';
 import type { ScoreRequest, ScoreResponse } from './types.js';
 
 const app = express();
@@ -17,6 +18,8 @@ app.use(express.json({ limit: '1mb' }));
 const streams = new Map<string, express.Response>();
 // Store scores by capsuleId and wallet address for lender verification
 const scoreStore = new Map<string, ScoreResponse>();
+// Initialize DUST payment service
+const dustPaymentService = new DustPaymentService(logger);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', midnightRpc: midnightBridge.rpcEndpoint });
@@ -312,6 +315,184 @@ app.get('/verify/:identifier', (req, res) => {
   });
 });
 
+// DUST Token Payment Endpoints
+
+// Check if score is borderline and eligible for enhancement
+app.get('/score/:identifier/enhancement-eligibility', (req, res) => {
+  const { identifier } = req.params;
+  
+  const score = scoreStore.get(identifier);
+  
+  if (!score) {
+    return res.status(404).json({ error: 'Score not found' });
+  }
+  
+  const currentScore = Math.round(score.adjustedScore);
+  const isBorderline = dustPaymentService.isBorderlineScore(currentScore);
+  const prices = dustPaymentService.getPrices();
+  
+  res.json({
+    eligible: isBorderline,
+    currentScore: currentScore,
+    borderlineRange: '390-410',
+    dustCost: prices.scoreEnhancement,
+    message: isBorderline 
+      ? `Your score (${currentScore}) is borderline. Pay ${prices.scoreEnhancement} DUST tokens to unlock Masumi AI enhancement!`
+      : `Score enhancement is only available for borderline scores (390-410). Your score: ${currentScore}`
+  });
+});
+
+// Enhance borderline score using Masumi AI (requires DUST payment)
+app.post('/score/:identifier/enhance', async (req, res) => {
+  const { identifier } = req.params;
+  const { paymentTxHash, walletAddress } = req.body;
+  
+  if (!paymentTxHash || !walletAddress) {
+    return res.status(400).json({ 
+      error: 'Missing required fields',
+      message: 'paymentTxHash and walletAddress are required'
+    });
+  }
+  
+  const score = scoreStore.get(identifier);
+  
+  if (!score) {
+    return res.status(404).json({ error: 'Score not found' });
+  }
+  
+  try {
+    logger.info({ identifier, paymentTxHash }, 'Processing score enhancement request');
+    
+    const currentScore = Math.round(score.adjustedScore);
+    
+    const enhancementResult = await dustPaymentService.enhanceScore(
+      identifier,
+      currentScore,
+      paymentTxHash,
+      walletAddress
+    );
+    
+    // Update stored score with enhanced value and mark as Masumi enhanced
+    score.adjustedScore = enhancementResult.newScore;
+    score.baseScore = enhancementResult.newScore;
+    const newBucket = Math.floor((enhancementResult.newScore - 300) / 100);
+    score.midnightProof.publicState.scoreBucket = newBucket;
+    (score as any).masumiEnhanced = true; // Track that AI enhancement was applied
+    scoreStore.set(identifier, score);
+    
+    logger.info({ 
+      oldScore: enhancementResult.oldScore, 
+      newScore: enhancementResult.newScore 
+    }, 'Score enhancement complete');
+    
+    res.json({
+      success: true,
+      enhancement: enhancementResult,
+      updatedScore: {
+        adjustedScore: score.adjustedScore,
+        scoreBucket: newBucket,
+        bucketRange: getBucketRange(newBucket)
+      }
+    });
+  } catch (error: unknown) {
+    logger.error({ error, identifier }, 'Score enhancement failed');
+    res.status(400).json({ 
+      error: 'Enhancement failed',
+      message: error instanceof Error ? error.message : 'Unknown error occurred'
+    });
+  }
+});
+
+// Unlock detailed borrower data (requires DUST payment)
+app.post('/verify/:identifier/unlock-details', async (req, res) => {
+  const { identifier } = req.params;
+  const { paymentTxHash } = req.body;
+  
+  if (!paymentTxHash) {
+    return res.status(400).json({ 
+      error: 'Missing payment transaction hash',
+      message: 'paymentTxHash is required'
+    });
+  }
+  
+  const score = scoreStore.get(identifier);
+  
+  if (!score) {
+    return res.status(404).json({ error: 'Score not found' });
+  }
+  
+  try {
+    logger.info({ identifier, paymentTxHash }, 'Unlocking borrower detailed data');
+    
+    const detailedData = await dustPaymentService.unlockBorrowerData(
+      identifier,
+      paymentTxHash
+    );
+    
+    logger.info({ identifier }, 'Borrower data unlocked successfully');
+    
+    res.json({
+      success: true,
+      data: detailedData,
+      paymentVerified: true
+    });
+  } catch (error: unknown) {
+    logger.error({ error, identifier }, 'Failed to unlock borrower data');
+    res.status(400).json({ 
+      error: 'Unlock failed',
+      message: error instanceof Error ? error.message : 'Unknown error occurred'
+    });
+  }
+});
+
+// Get DUST token prices
+app.get('/dust-prices', (req, res) => {
+  const prices = dustPaymentService.getPrices();
+  res.json({
+    scoreEnhancement: prices.scoreEnhancement,
+    dataAccess: prices.dataAccess,
+    currency: 'DUST',
+    network: 'midnight-testnet'
+  });
+});
+
+// Request a spoofed payment tx from the official Midnight proof server
+app.post('/payments/spoof', async (req, res) => {
+  try {
+    const { purpose } = req.body as { purpose?: 'score_enhancement' | 'data_access' };
+    if (!purpose) {
+      return res.status(400).json({ error: 'purpose is required' });
+    }
+
+    const amount = purpose === 'score_enhancement' 
+      ? dustPaymentService.getPrices().scoreEnhancement 
+      : dustPaymentService.getPrices().dataAccess;
+
+    const proofServerUrl = (dustPaymentService as any).PROOF_SERVER_URL || 'http://localhost:6300';
+    const resp = await fetch(`${proofServerUrl}/api/transaction/spoof`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount, purpose })
+    });
+
+    if (!resp.ok) {
+      const txt = await resp.text();
+      logger.error({ status: resp.status, body: txt }, 'Proof server spoof request failed');
+      return res.status(502).json({ error: 'Proof server spoof failed' });
+    }
+
+    const data = await resp.json() as { txHash?: string };
+    if (!data.txHash) {
+      return res.status(500).json({ error: 'Spoof did not return txHash' });
+    }
+
+    res.json({ txHash: data.txHash, amount, purpose });
+  } catch (error) {
+    logger.error({ error }, 'Spoof payment request failed');
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
 function getBucketRange(bucket: number): string {
   const ranges = ['300-499', '500-649', '650-749', '750-849', '850+'];
   return ranges[bucket] || 'Unknown';
@@ -320,7 +501,17 @@ function getBucketRange(bucket: number): string {
 function emitStream(sessionId: string, payload: unknown) {
   const stream = streams.get(sessionId);
   if (!stream) return;
-  stream.write(`data: ${JSON.stringify(payload)}\n\n`);
+  try {
+    // Send the data payload
+    stream.write(`data: ${JSON.stringify(payload)}\n\n`);
+    // Send an explicit end event for determinism
+    stream.write(`event: end\n`);
+    stream.write(`data: end\n\n`);
+  } finally {
+    // Close and clean up the stream to avoid dangling connections
+    stream.end();
+    streams.delete(sessionId);
+  }
 }
 
 const port = Number(env.PORT);
