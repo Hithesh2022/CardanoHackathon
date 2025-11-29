@@ -14,9 +14,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: MIDNIGHT_PROOF_SERVER
-        sync: true
+        value: "https://your-proof-server.example.com"
       - key: MASUMI_AGENT_URL
-        sync: true
+        value: "https://masumi-agent.onrender.com"
     healthCheckPath: /health
 
   - type: web
@@ -34,11 +34,11 @@ services:
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_API_BASE
-        sync: true
+        value: "https://atlascred-backend.onrender.com"
       - key: NEXT_PUBLIC_DUST_TREASURY_ADDRESS
-        sync: true
+        value: "midnight1qxyzdusttreasury"
       - key: NEXT_PUBLIC_DUST_ASSET_ID
-        sync: true
+        value: "DUST"
 
   - type: web
     name: masumi-agent
