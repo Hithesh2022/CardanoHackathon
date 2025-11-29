@@ -40,7 +40,7 @@ The UI has been completely rebuilt from scratch with a professional fintech desi
   - "Verify a Borrower" → Lender flow
 
 **Problem Statement**
-- "1.7 Billion People Are Unbanked"
+- "2.5 Billion People Lack Credit History"
 - Explains traditional credit exclusion
 
 **How It Works (3 Steps)**

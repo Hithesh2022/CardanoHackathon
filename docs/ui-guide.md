@@ -5,7 +5,7 @@
 ### Primary Users: **Credit Seekers**
 Individuals who want to build creditworthiness using alternative data:
 - **Thin-file individuals**: People with little to no traditional credit history
-- **Unbanked/underbanked**: Those without access to traditional banking
+- **Credit invisible**: 2.5 billion people globally who lack formal credit history
 - **Immigrants**: New residents without local credit history
 - **Gig economy workers**: Freelancers with inconsistent traditional documentation
 - **Young adults**: Starting their financial journey

@@ -1,21 +1,33 @@
-# AtlasCred – Privacy-Preserving Credit Scoring on Midnight
+# AtlasCred – Privacy-Preserving Credit Scoring
 
-AtlasCred is a hackathon prototype for a privacy-preserving credit scoring experience on **Midnight blockchain** using **zero-knowledge proofs**. It combines:
+AtlasCred brings financial inclusion to **2.5 billion people worldwide** who lack formal credit history. It's a privacy-preserving credit scoring platform using **zero-knowledge proofs** and **smart contracts** on both Cardano and Midnight blockchains.
 
-- **Midnight Smart Contracts (Minokawa)** with ZK circuits for selective score disclosure
-- **Masumi AI Agent** that performs fairness-aware scoring with bias mitigation
-- **Next.js Frontend** with professional fintech UX
-- **Node/Express API** bridging wallets, AI, and Midnight ZK transactions
+## 🎯 The Problem
+
+- **2.5 billion adults globally** have no formal credit score
+- **26 million Americans** are "credit invisible"
+- Traditional credit bureaus ignore alternative data (rent, utilities, mobile payments)
+- Privacy concerns prevent sharing financial history
+
+## 🔐 Our Solution
+
+- **Dual Smart Contracts**: Aiken (Cardano L1) + Compact (Midnight Network)
+- **Zero-Knowledge Proofs**: Prove creditworthiness without revealing exact score
+- **Lace Wallet Integration**: Real on-chain verification using Koios API
+- **Masumi AI Agent**: Fairness-aware scoring with bias mitigation
+- **Next.js Frontend**: Professional fintech UX with glassmorphism design
+- **Alternative Data**: Use rent, utilities, mobile payments to build credit
 
 ## Monorepo layout
 
 | Path | Purpose |
 | --- | --- |
-| `frontend/` | Next.js + Tailwind UI for the credit experience with Midnight wallet integration |
-| `backend/` | Express API, score engine, Midnight ZK bridge, Masumi AI client |
+| `frontend/` | Next.js + Tailwind UI with Lace wallet verification and real-time score updates |
+| `backend/` | Express API with Koios blockchain integration and Masumi AI client |
 | `agents/masumi-agent/` | FastAPI service with fairness kernel for bias mitigation |
-| `contracts/midnight/` | Compact smart contract with ZK circuits for private credit scores |
-| `docs/architecture.md` | System overview and deployment targets |
+| `contracts/atlascred/` | **Aiken smart contract** for Cardano L1 (score_proof.ak) |
+| `contracts/midnight/` | **Compact smart contract** for Midnight Network with ZK circuits |
+| `docs/` | Complete technical documentation and architecture guides |
 
 ## Quick start
 
@@ -58,15 +70,69 @@ Vitest covers the fairness guard + hashing logic. Extend with integration tests 
 - **Midnight Contracts**: Run `minokawa compile score-proof.compact` inside `contracts/midnight` to compile the Minokawa contract (v0.18, compiler v0.26.0). Deploy to Midnight testnet with `minokawa deploy`.
 - **Midnight SDK Integration**: Next step is to wire up actual Midnight SDK in `backend/src/services/midnightBridge.ts` to call ZK circuits for real.
 
-## Smart Contract Details
+## 🔗 Smart Contracts (Dual-Chain Architecture)
 
-The Midnight Minokawa contract at `contracts/midnight/score-proof.compact` uses **zero-knowledge circuits** to enforce:
-- **Private State**: Exact credit score (300-850) stored in private state, never revealed
-- **Selective Disclosure**: Users prove they're in a score bucket (0-4) without revealing exact score
-- **Threshold Proofs**: Lenders verify "score >= X" without learning exact value
-- **Ownership**: Only wallet owner can update or revoke proofs
-- **Expiry**: Score proofs expire after 7 days
-- **Privacy Guarantee**: ZK proofs prevent any data leakage
+### 1. Cardano L1 Contract (`contracts/atlascred/validators/score_proof.ak`)
+**Language**: Aiken  
+**Purpose**: On-chain score verification and selective disclosure on Cardano mainnet
+
+**Features**:
+- 🔐 **Ownership Control**: Only wallet owner can update score capsule
+- 📊 **Bucket Disclosure**: Reveal score bucket (0-4) without exact score
+- ⏰ **Expiry Checks**: Proofs expire after set time
+- 🔒 **Hash Verification**: Score stored as hash with nonce for privacy
+- ✅ **Signature Validation**: All operations require owner signature
+
+**Score Buckets**:
+- Bucket 0: 300-499 (Poor)
+- Bucket 1: 500-649 (Fair)
+- Bucket 2: 650-749 (Good)
+- Bucket 3: 750-849 (Very Good)
+- Bucket 4: 850+ (Excellent)
+
+### 2. Midnight Network Contract (`contracts/midnight/score-proof.compact`)
+**Language**: Compact (Minokawa v0.18)  
+**Purpose**: Zero-knowledge proof generation with advanced privacy
+
+**ZK Features**:
+- 🔒 **Private State**: Exact score (300-850) never revealed on-chain
+- 🎭 **Selective Disclosure**: Prove score bucket membership without revealing value
+- 📄 **Document Privacy**: Store verified doc hashes privately (Aadhar, PAN, Bank, etc.)
+- 🔢 **Trust Boost**: Calculate trust score from verified documents (0-100 points)
+- ⚡ **ZK Circuits**: `initializeScore`, `verifyBucket`, `proveMinimumScore`, `updateScore`
+- 🌐 **Public State**: Only bucket number, proof count, and document count visible
+
+**Privacy Guarantees**:
+- ✅ Exact score remains private
+- ✅ Which documents were verified stays private
+- ✅ Only bucket range and document count are public
+- ✅ Lenders verify "score >= X" without learning actual score
+
+## 🚀 Current Implementation Status
+
+### ✅ Fully Implemented
+- **Lace Wallet Verification**: Real on-chain verification using Koios API (FREE, no API key)
+- **Cardano Address Validation**: Supports `addr1` (mainnet), `addr_test1` (testnet), `stake1`
+- **Smart Contracts**: Both Aiken (Cardano) and Compact (Midnight) contracts written
+- **Credit Score Engine**: Fairness-aware scoring with bias mitigation
+- **UI/UX**: Modern glassmorphic design with real-time updates and toast notifications
+- **Document Verification**: Upload and verify identity documents for trust boost
+- **Alternative Data Scoring**: Income stability, repayment consistency, savings rate, community trust
+
+### 🔄 Next Steps (Production)
+- Deploy Aiken contract to Cardano mainnet/testnet
+- Deploy Compact contract to Midnight Network
+- Wire up Midnight SDK in `backend/src/services/midnightBridge.ts`
+- Integrate ZK proof generation with frontend wallet connection
+- Add Blockfrost API key for enhanced Cardano queries (optional - Koios works great!)
+- Deploy Masumi AI agent to cloud infrastructure
+
+### 🎯 Ready to Demo
+The entire system works end-to-end with:
+- Real Lace wallet address verification against Cardano blockchain
+- Mock smart contract interactions (ready to swap with deployed contracts)
+- Functional credit score calculation with fairness guards
+- Beautiful UI with toast notifications and document upload
 
 ## 📚 Documentation
 

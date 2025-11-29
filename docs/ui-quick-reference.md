@@ -235,4 +235,4 @@ A: Exact score stored encrypted off-chain. Only hash + bucket on-chain. You cont
 
 **🎯 Mission**: Give everyone access to credit, regardless of traditional history  
 **🔐 Method**: Privacy-preserving, AI-fair, blockchain-verifiable scoring  
-**🌍 Impact**: Financial inclusion for 1.7 billion unbanked people worldwide
+**🌍 Impact**: Financial inclusion for 2.5 billion people worldwide who lack formal credit history
