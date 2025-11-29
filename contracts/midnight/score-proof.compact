@@ -1,0 +1,270 @@
+// AtlasCred Credit Score Proof Contract
+// Midnight Network - Minokawa Language v0.18
+// Compiler: v0.26.0
+// Zero-knowledge proof for selective score disclosure
+// Open-sourced under Linux Foundation Decentralized Trust (LFDT)
+
+pragma language_version >= 0.16;
+import CompactStandardLibrary;
+
+contract ScoreProof
+
+// Private state - only visible to owner
+private state {
+  owner: Address,
+  exactScore: Uint<16>,        // Actual score (300-850)
+  scoreHash: ByteString<32>,   // SHA256 of score + nonce
+  nonce: ByteString<16>,       // Privacy nonce
+  expiresAt: Timestamp,        // Proof expiry time
+  
+  // Document verification (private - never revealed)
+  documentsVerified: List<ByteString<32>>,  // Hashes of verified docs
+  mobileVerified: Bool,        // Mobile number verified
+  aadhaarVerified: Bool,       // Aadhaar verified
+  panVerified: Bool,           // PAN verified
+  bankVerified: Bool,          // Bank statement verified
+  trustBoost: Uint<8>          // 0-100 trust boost from docs
+}
+
+// Public state - visible to everyone
+public state {
+  scoreBucket: Uint<8>,        // 0-4 bucket range (public)
+  isActive: Bool,              // Is proof still valid
+  proofCount: Uint<32>,        // Number of times verified
+  hasDocuments: Bool,          // Has any verified documents (yes/no only)
+  documentCount: Uint<8>       // Number of docs (not which ones)
+}
+
+// Initialize new score proof (private transaction)
+circuit initializeScore(
+  private ownerAddr: Address,
+  private score: Uint<16>,
+  private scoreNonce: ByteString<16>,
+  private docHashes: List<ByteString<32>>,
+  private mobile: Bool,
+  private aadhaar: Bool,
+  private pan: Bool,
+  private bank: Bool,
+  private boost: Uint<8>,
+  public bucket: Uint<8>
+) {
+  // Validate score in range
+  assert(score >= 300 && score <= 850, "Score must be 300-850");
+  assert(boost <= 100, "Trust boost must be 0-100");
+  
+  // Validate bucket matches score
+  let expectedBucket = scoreToBucket(score);
+  assert(bucket == expectedBucket, "Bucket must match score");
+  
+  // Hash score for privacy
+  let hash = sha256(score ++ scoreNonce);
+  
+  // Set private state (ZK-protected)
+  owner := ownerAddr;
+  exactScore := score;
+  scoreHash := hash;
+  nonce := scoreNonce;
+  expiresAt := now() + 7 days;
+  
+  // Set private document state (never revealed)
+  documentsVerified := docHashes;
+  mobileVerified := mobile;
+  aadhaarVerified := aadhaar;
+  panVerified := pan;
+  bankVerified := bank;
+  trustBoost := boost;
+  
+  // Set public state (only counts, not which docs)
+  scoreBucket := bucket;
+  isActive := true;
+  proofCount := 0;
+  hasDocuments := (mobile || aadhaar || pan || bank);
+  documentCount := (if mobile then 1 else 0) + 
+                   (if aadhaar then 1 else 0) + 
+                   (if pan then 1 else 0) + 
+                   (if bank then 1 else 0);
+}
+
+// Lender verifies user is in a score bucket (ZK proof)
+// Proves bucket without revealing exact score
+circuit verifyBucket(
+  private requesterAddr: Address,
+  public requestedBucket: Uint<8>
+) -> Bool {
+  // Check proof not expired
+  assert(now() < expiresAt, "Proof expired");
+  assert(isActive, "Proof not active");
+  
+  // ZK proof: prove exactScore maps to scoreBucket
+  // without revealing exactScore
+  let actualBucket = scoreToBucket(exactScore);
+  let bucketMatches = (actualBucket == scoreBucket);
+  let requestMatches = (requestedBucket == scoreBucket);
+  
+  assert(bucketMatches, "Internal consistency check failed");
+  
+  // Increment verification counter (public state)
+  proofCount := proofCount + 1;
+  
+  return requestMatches;
+}
+
+// Lender requests proof of minimum score threshold (ZK)
+// Proves "score >= threshold" without revealing exact score
+circuit proveMinimumScore(
+  private requesterAddr: Address,
+  public threshold: Uint<16>
+) -> Bool {
+  assert(now() < expiresAt, "Proof expired");
+  assert(isActive, "Proof not active");
+  
+  // ZK proof: prove exactScore >= threshold
+  // without revealing exactScore
+  let meetsThreshold = (exactScore >= threshold);
+  
+  proofCount := proofCount + 1;
+  
+  return meetsThreshold;
+}
+
+// Owner updates score with new data (private)
+circuit updateScore(
+  private ownerSig: Signature,
+  private newScore: Uint<16>,
+  private newNonce: ByteString<16>
+) {
+  // Verify caller is owner
+  assert(verify(ownerSig, owner), "Only owner can update");
+  
+  // Validate new score
+  assert(newScore >= 300 && newScore <= 850, "Invalid score");
+  
+  // Update private state
+  exactScore := newScore;
+  nonce := newNonce;
+  scoreHash := sha256(newScore ++ newNonce);
+  expiresAt := now() + 7 days;
+  
+  // Update public bucket
+  scoreBucket := scoreToBucket(newScore);
+}
+
+// Owner revokes proof (makes it inactive)
+circuit revokeProof(
+  private ownerSig: Signature
+) {
+  assert(verify(ownerSig, owner), "Only owner can revoke");
+  isActive := false;
+}
+
+// Prove minimum document verification level (ZK proof)
+// Lender can verify "user has at least X documents" without knowing which ones
+circuit proveMinimumDocuments(
+  private requesterAddr: Address,
+  public minDocCount: Uint<8>
+) -> Bool {
+  assert(now() < expiresAt, "Proof expired");
+  assert(isActive, "Proof not active");
+  
+  // ZK proof: prove we have >= minDocCount documents
+  // without revealing which specific documents
+  let actualCount = (if mobileVerified then 1 else 0) + 
+                    (if aadhaarVerified then 1 else 0) + 
+                    (if panVerified then 1 else 0) + 
+                    (if bankVerified then 1 else 0);
+  
+  let meetsRequirement = (actualCount >= minDocCount);
+  
+  proofCount := proofCount + 1;
+  
+  return meetsRequirement;
+}
+
+// Prove trust boost is above threshold (ZK proof)
+// Verifier can check "user has trust boost >= X%" without seeing exact boost
+circuit proveTrustBoost(
+  private requesterAddr: Address,
+  public minBoost: Uint<8>
+) -> Bool {
+  assert(now() < expiresAt, "Proof expired");
+  assert(isActive, "Proof not active");
+  assert(minBoost <= 100, "Invalid boost threshold");
+  
+  // ZK proof: trustBoost >= minBoost
+  let meetsBoost = (trustBoost >= minBoost);
+  
+  proofCount := proofCount + 1;
+  
+  return meetsBoost;
+}
+
+// Update documents (private)
+circuit addDocument(
+  private ownerSig: Signature,
+  private docHash: ByteString<32>,
+  private docType: Uint<8>  // 1=mobile, 2=aadhaar, 3=pan, 4=bank
+) {
+  assert(verify(ownerSig, owner), "Only owner can add documents");
+  assert(docType >= 1 && docType <= 4, "Invalid document type");
+  
+  // Add document hash to private list
+  documentsVerified := append(documentsVerified, docHash);
+  
+  // Update verification flags
+  if (docType == 1) {
+    mobileVerified := true;
+  } else if (docType == 2) {
+    aadhaarVerified := true;
+  } else if (docType == 3) {
+    panVerified := true;
+  } else if (docType == 4) {
+    bankVerified := true;
+  }
+  
+  // Recalculate trust boost (5% per document, max 20%)
+  let newBoost = (if mobileVerified then 5 else 0) +
+                 (if aadhaarVerified then 5 else 0) +
+                 (if panVerified then 5 else 0) +
+                 (if bankVerified then 5 else 0);
+  trustBoost := newBoost;
+  
+  // Update public counts (not which docs)
+  hasDocuments := true;
+  documentCount := (if mobileVerified then 1 else 0) + 
+                   (if aadhaarVerified then 1 else 0) + 
+                   (if panVerified then 1 else 0) + 
+                   (if bankVerified then 1 else 0);
+}
+
+// Helper: Map score to bucket (0-4)
+function scoreToBucket(score: Uint<16>) -> Uint<8> {
+  if (score < 500) {
+    return 0;  // 300-499
+  } else if (score < 650) {
+    return 1;  // 500-649
+  } else if (score < 750) {
+    return 2;  // 650-749
+  } else if (score < 850) {
+    return 3;  // 750-849
+  } else {
+    return 4;  // 850+
+  }
+}
+
+// Query functions (read-only, no state changes)
+
+query getPublicInfo() -> (Uint<8>, Bool, Uint<32>) {
+  return (scoreBucket, isActive, proofCount);
+}
+
+query getBucketRange(bucket: Uint<8>) -> String {
+  if (bucket == 0) { return "300-499"; }
+  else if (bucket == 1) { return "500-649"; }
+  else if (bucket == 2) { return "650-749"; }
+  else if (bucket == 3) { return "750-849"; }
+  else { return "850+"; }
+}
+
+query isExpired() -> Bool {
+  return now() >= expiresAt;
+}

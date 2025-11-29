@@ -1,0 +1,12 @@
+name = "atlascred"
+version = "0.1.0"
+license = "Apache-2.0"
+description = "Privacy-preserving credit score validator for Cardano"
+
+[dependencies]
+aiken-lang/stdlib = "2.1.0"
+
+[[repository]]
+name = "aiken-lang/stdlib"
+version = "2.1.0"
+source = "github"
