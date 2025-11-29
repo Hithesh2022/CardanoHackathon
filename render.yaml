@@ -1,0 +1,57 @@
+services:
+  - type: web
+    name: atlascred-backend
+    env: node
+    rootDir: backend
+    plan: starter
+    region: oregon
+    buildCommand: npm install; npm run build
+    startCommand: npm run start
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "4000"
+      - key: NODE_ENV
+        value: production
+      - key: MIDNIGHT_PROOF_SERVER
+        sync: true
+      - key: MASUMI_AGENT_URL
+        sync: true
+    healthCheckPath: /health
+
+  - type: web
+    name: atlascred-frontend
+    env: node
+    rootDir: frontend
+    plan: starter
+    region: oregon
+    buildCommand: npm install; npm run build
+    startCommand: npm run start
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "3000"
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_BASE
+        sync: true
+      - key: NEXT_PUBLIC_DUST_TREASURY_ADDRESS
+        sync: true
+      - key: NEXT_PUBLIC_DUST_ASSET_ID
+        sync: true
+
+  - type: web
+    name: masumi-agent
+    env: python
+    rootDir: agents/masumi-agent
+    plan: starter
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 8000
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: ENV
+        value: production
+    healthCheckPath: /health
