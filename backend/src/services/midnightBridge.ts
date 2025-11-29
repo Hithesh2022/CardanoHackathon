@@ -53,31 +53,44 @@ export class MidnightBridge {
 
     const trimmedAddress = address.trim();
 
-    // Check if it's a valid Cardano address format (mainnet or testnet)
-    const isMainnet = trimmedAddress.startsWith('addr1');
-    const isTestnet = trimmedAddress.startsWith('addr_test1');
-    const isStakeAddress = trimmedAddress.startsWith('stake1') || trimmedAddress.startsWith('stake_test1');
+    // Check if it's a valid Cardano address format
+    // Accept both Bech32 format (addr1...) and hex format (from wallet extensions)
+    const isBech32 = trimmedAddress.startsWith('addr1') || 
+                     trimmedAddress.startsWith('addr_test1') || 
+                     trimmedAddress.startsWith('stake1') || 
+                     trimmedAddress.startsWith('stake_test1');
+    
+    // Hex addresses from wallet extensions are 56-114 characters of hex
+    const isHex = /^[0-9a-fA-F]{56,114}$/.test(trimmedAddress);
 
-    if (!isMainnet && !isTestnet && !isStakeAddress) {
+    if (!isBech32 && !isHex) {
       return {
         valid: false,
         exists: false,
-        message: 'Invalid Cardano wallet address. Must start with "addr1" (mainnet), "addr_test1" (testnet), or "stake1" (stake address)'
+        message: 'Invalid Cardano wallet address format. Must be Bech32 (addr1...) or hex from wallet extension'
       };
     }
 
-    // Cardano addresses are typically 58-108 characters (Bech32 encoded)
-    if (trimmedAddress.length < 58) {
+    // Validate length based on format
+    if (isBech32 && trimmedAddress.length < 58) {
       return {
         valid: false,
         exists: false,
-        message: 'Wallet address is too short. Valid Cardano addresses are at least 58 characters'
+        message: 'Bech32 wallet address is too short. Must be at least 58 characters'
       };
     }
 
-    // Validate Bech32 pattern for Cardano addresses
+    if (isHex && trimmedAddress.length < 56) {
+      return {
+        valid: false,
+        exists: false,
+        message: 'Hex wallet address is too short. Must be at least 56 characters'
+      };
+    }
+
+    // Validate Bech32 pattern for Cardano addresses (only if Bech32 format)
     const validBech32Pattern = /^(addr1|addr_test1|stake1|stake_test1)[ac-hj-np-z02-9]{50,100}$/;
-    if (!validBech32Pattern.test(trimmedAddress)) {
+    if (isBech32 && !validBech32Pattern.test(trimmedAddress)) {
       return {
         valid: false,
         exists: false,
@@ -85,12 +98,17 @@ export class MidnightBridge {
       };
     }
 
+    // Determine network type
+    const isMainnet = trimmedAddress.startsWith('addr1') || (isHex && trimmedAddress.startsWith('01'));
+    const networkName = isMainnet ? 'mainnet' : 'testnet';
+
     // Real blockchain verification using Koios API (FREE, no API key needed)
+    // Note: Hex addresses from wallet extensions need to be used directly
     try {
       const network = isMainnet ? 'api' : 'preprod';
       const koiosUrl = `https://${network}.koios.rest/api/v1/address_info`;
       
-      console.log(`Verifying wallet on Cardano blockchain: ${trimmedAddress}`);
+      console.log(`Verifying wallet on Cardano blockchain (${networkName}): ${trimmedAddress.substring(0, 20)}...`);
       
       const response = await fetch(koiosUrl, {
         method: 'POST',
@@ -105,6 +123,15 @@ export class MidnightBridge {
 
       if (!response.ok) {
         console.error(`Koios API error: ${response.status} ${response.statusText}`);
+        // If hex address, accept it as valid since it came from wallet extension
+        if (isHex) {
+          console.log(`✅ Hex address from wallet extension accepted`);
+          return {
+            valid: true,
+            exists: true,
+            message: `Valid Cardano wallet address from wallet extension (${networkName})`
+          };
+        }
         return {
           valid: true,
           exists: false,
@@ -123,21 +150,39 @@ export class MidnightBridge {
         return {
           valid: true,
           exists: true,
-          message: `Lace wallet verified on Cardano ${isMainnet ? 'mainnet' : 'testnet'}`
+          message: `Cardano wallet verified on ${networkName}`
         };
       }
 
-      // If Koios doesn't recognize the address at all, it might be invalid
-      // But for Lace wallets, we accept valid format even if not on-chain yet
+      // If Koios doesn't recognize the address, still accept hex addresses from wallet extensions
+      if (isHex) {
+        console.log(`✅ Hex address from wallet extension accepted (not yet on-chain)`);
+        return {
+          valid: true,
+          exists: true,
+          message: `Valid Cardano wallet address from wallet extension (${networkName})`
+        };
+      }
+
+      // For Bech32, accept valid format even if not on-chain yet
       console.log(`⚠️ Address valid but not yet on blockchain: ${trimmedAddress}`);
       return {
         valid: true,
         exists: true,
-        message: `Valid Cardano wallet address (${isMainnet ? 'mainnet' : 'testnet'})`
+        message: `Valid Cardano wallet address (${networkName})`
       };
 
     } catch (error) {
       console.error('Blockchain verification error:', error);
+      // If hex address from wallet extension, accept it despite API error
+      if (isHex) {
+        console.log(`✅ Hex address from wallet extension accepted (API unavailable)`);
+        return {
+          valid: true,
+          exists: true,
+          message: `Valid Cardano wallet address from wallet extension (${networkName})`
+        };
+      }
       return {
         valid: true,
         exists: false,

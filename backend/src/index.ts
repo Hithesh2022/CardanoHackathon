@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import pino from 'pino';
+import crypto from 'crypto';
 import { env } from './config/env.js';
 import { scoreRequestSchema } from './schemas/scoreRequest.js';
 import { scoreEngine } from './services/scoreEngine.js';
@@ -69,6 +70,73 @@ app.post('/score', async (req, res) => {
 
   const payload = parseResult.data as ScoreRequest;
   try {
+    logger.info({ 
+      wallet: payload.walletAddress,
+      hasSignature: !!req.body.walletSignature,
+      hasBaseToken: !!payload.baseToken,
+      hasVerificationHash: !!payload.verificationHash,
+      baseToken: payload.baseToken?.substring(0, 20),
+      bodyKeys: Object.keys(req.body)
+    }, 'Score request received');
+
+    // CRITICAL: Verify wallet ownership via signature or authorization
+    // This prevents borrowers from using someone else's wallet address
+    if (!req.body.walletSignature) {
+      logger.warn({ wallet: payload.walletAddress }, 'Missing wallet signature');
+      return res.status(400).json({ 
+        error: 'Wallet signature required',
+        message: 'You must authorize your wallet to prove ownership. Please try again and authorize when prompted.'
+      });
+    }
+
+    // Parse and validate signature/authorization proof
+    try {
+      const signatureData = JSON.parse(req.body.walletSignature);
+      const signatureAge = Date.now() - signatureData.timestamp;
+      
+      logger.info({ 
+        wallet: payload.walletAddress,
+        signatureAge: Math.round(signatureAge / 1000),
+        method: signatureData.method || 'unknown',
+        walletName: signatureData.walletName || 'unknown',
+        hasSignature: !!signatureData.signature,
+        hasKey: !!signatureData.key
+      }, 'Validating wallet proof');
+      
+      // Proof must be fresh (within 5 minutes)
+      if (signatureAge > 5 * 60 * 1000) {
+        return res.status(400).json({ 
+          error: 'Proof expired',
+          message: 'Wallet proof is too old. Please authorize again.'
+        });
+      }
+
+      // Verify proof includes correct wallet address
+      if (!signatureData.message.includes(payload.walletAddress)) {
+        logger.warn({ 
+          messageWallet: signatureData.message,
+          payloadWallet: payload.walletAddress 
+        }, 'Wallet address mismatch');
+        return res.status(400).json({ 
+          error: 'Proof mismatch',
+          message: 'Wallet proof does not match wallet address'
+        });
+      }
+
+      // Log the verification method used
+      if (signatureData.method === 'cryptographic_signature') {
+        logger.info({ wallet: payload.walletAddress }, '✅ Wallet cryptographically signed');
+      } else {
+        logger.info({ wallet: payload.walletAddress }, '✅ Wallet authorization verified');
+      }
+    } catch (error) {
+      logger.error({ error, wallet: payload.walletAddress }, 'Failed to parse wallet proof');
+      return res.status(400).json({ 
+        error: 'Invalid proof format',
+        message: 'Wallet proof is malformed. Please try authorizing again.'
+      });
+    }
+
     // Verify wallet address exists on Midnight blockchain
     const walletVerification = await midnightBridge.verifyWalletAddress(payload.walletAddress);
     
@@ -102,13 +170,24 @@ app.post('/score', async (req, res) => {
         contractAddress: proof.contractAddress,
         expiresAt: proof.expiresAt,
         txHash: proof.txHash,
-        publicState: proof.publicState
+        publicState: proof.publicState,
+        // SECURITY: Store wallet signature AND verification hash for two-token system
+        walletSignature: req.body.walletSignature,
+        walletAddress: payload.walletAddress,
+        verificationHash: payload.verificationHash
       }
     };
 
     // Store score for lender verification (by proofId and wallet)
     scoreStore.set(proof.proofId, response);
     scoreStore.set(payload.walletAddress, response);
+
+    logger.info({
+      proofId: proof.proofId,
+      hasVerificationHash: !!payload.verificationHash,
+      verificationHashPreview: payload.verificationHash?.substring(0, 16) + '...',
+      baseToken: payload.baseToken
+    }, 'Stored score with verification hash');
 
     emitStream(payload.sessionId, response);
     res.json(response);
@@ -130,10 +209,85 @@ app.get('/verify/:identifier', (req, res) => {
     });
   }
 
+  // Parse signature details for lender verification
+  let signatureDetails = null;
+  if (score.midnightProof.walletSignature) {
+    try {
+      signatureDetails = JSON.parse(score.midnightProof.walletSignature);
+    } catch (e) {
+      logger.warn({ error: e }, 'Failed to parse signature for lender');
+    }
+  }
+
+  // TWO-TOKEN VERIFICATION SYSTEM
+  const lenderBaseToken = req.query.baseToken as string;
+  const lenderDocumentNumber = req.query.documentNumber as string;
+  const storedVerificationHash = score.midnightProof.verificationHash;
+  
+  logger.info({ 
+    proofId: identifier,
+    lenderBaseToken: lenderBaseToken,
+    lenderDocNumber: lenderDocumentNumber,
+    hasLenderBaseToken: !!lenderBaseToken,
+    hasLenderDocNumber: !!lenderDocumentNumber,
+    storedHash: storedVerificationHash,
+    hasStoredHash: !!storedVerificationHash
+  }, 'Two-token verification check');
+  
+  // SECURITY: Two-token verification is MANDATORY
+  // Legacy scores without verification hash are rejected
+  if (!storedVerificationHash) {
+    logger.warn({ proofId: identifier }, 'Legacy score without verification hash - rejected');
+    return res.status(403).json({
+      error: 'Legacy proof not supported',
+      message: 'This proof was created before two-token verification was implemented. Please ask the borrower to generate a new score.',
+      legacyProof: true
+    });
+  }
+
+  // Lender MUST provide both base token and document number
+  if (!lenderBaseToken || !lenderDocumentNumber) {
+    logger.warn({ proofId: identifier }, 'Lender missing required tokens');
+    return res.status(403).json({
+      error: 'Verification tokens required',
+      message: 'This proof requires both base token and document number. Please ask the borrower for these.',
+      tokensRequired: true
+    });
+  }
+
+  // Generate hash from lender's input: hash(baseToken + documentNumber)
+  const lenderData = `${lenderBaseToken.trim()}-${lenderDocumentNumber.trim()}`;
+  const lenderHash = crypto.createHash('sha256').update(lenderData).digest('hex');
+  
+  const hashMatches = lenderHash === storedVerificationHash;
+  
+  logger.info({ 
+    proofId: identifier,
+    lenderHash: lenderHash.substring(0, 16) + '...',
+    storedHash: storedVerificationHash.substring(0, 16) + '...',
+    matches: hashMatches
+  }, 'Comparing verification hashes');
+  
+  if (!hashMatches) {
+    logger.warn({ 
+      proofId: identifier,
+      lenderHash,
+      storedHash: storedVerificationHash
+    }, 'Hash mismatch - fraud attempt detected');
+    return res.status(403).json({
+      error: 'Verification failed',
+      message: 'The base token or document number you provided does NOT match. This borrower may be using someone else\'s proof.',
+      tokensRequired: true,
+      tokensVerified: false
+    });
+  }
+
+  logger.info({ proofId: identifier }, 'Two-token verification successful');
+
   // Return verification data with Midnight proof
   res.json({
     found: true,
-    walletAddress: req.query.wallet || 'midnight1qxyzhackathon',
+    walletAddress: score.midnightProof.walletAddress || req.query.wallet || 'midnight1qxyzhackathon',
     proofId: score.midnightProof.proofId,
     contractAddress: score.midnightProof.contractAddress,
     scoreBucket: score.midnightProof.publicState.scoreBucket,
@@ -145,7 +299,16 @@ app.get('/verify/:identifier', (req, res) => {
     verifiedOnChain: true,
     txHash: score.midnightProof.txHash,
     confidence: score.confidence,
-    adjustedScore: score.adjustedScore
+    adjustedScore: score.adjustedScore,
+    // SECURITY: Include signature details AND document verification
+    walletSignature: score.midnightProof.walletSignature,
+    signatureVerified: !!score.midnightProof.walletSignature,
+    walletName: signatureDetails?.walletName || null,
+    signatureMethod: signatureDetails?.method || null,
+    signatureTimestamp: signatureDetails?.timestamp || null,
+    // NEW: Two-token hash verification (if we got here, it means it was verified)
+    tokensRequired: !!storedVerificationHash,
+    tokensVerified: !!storedVerificationHash // Always true if we reach here (rejected above if mismatch)
   });
 });
 

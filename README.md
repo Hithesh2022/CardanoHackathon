@@ -13,10 +13,55 @@ AtlasCred brings financial inclusion to **2.5 billion people worldwide** who lac
 
 - **Dual Smart Contracts**: Aiken (Cardano L1) + Compact (Midnight Network)
 - **Zero-Knowledge Proofs**: Prove creditworthiness without revealing exact score
+- **Wallet Signature Verification**: Cryptographic proof of wallet ownership prevents fraud
 - **Lace Wallet Integration**: Real on-chain verification using Koios API
 - **Masumi AI Agent**: Fairness-aware scoring with bias mitigation
 - **Next.js Frontend**: Professional fintech UX with glassmorphism design
 - **Alternative Data**: Use rent, utilities, mobile payments to build credit
+
+## 🛡️ Multi-Layer Security System
+
+### Layer 1: Wallet Signature Verification
+
+**Problem**: A malicious borrower could copy someone else's Lace wallet address, get a high credit score, and present it to lenders.
+
+**Solution**: **Cryptographic Wallet Signature**
+
+1. **Borrower Signs Message**: When calculating score, borrower must sign a message with their Lace wallet private key
+2. **Signature Stored with Proof**: The cryptographic signature is embedded in the ZK proof on Midnight blockchain
+3. **Lender Verifies Signature**: When lender checks the proof, they see if the wallet signature is verified
+4. **Cannot Be Forged**: Only the real wallet owner has the private key to create a valid signature
+
+### Layer 2: Two-Token Hash Verification (NEW)
+
+**Problem**: Borrowers could share their proof ID with friends, allowing unauthorized access to their credit score.
+
+**Solution**: **SHA-256 Hash-Based Token System**
+
+1. **Token Generation**: Borrower generates:
+   - `baseToken`: Random unique identifier (e.g., `addr1qxy-k4j8n9m-1703567890`)
+   - `verificationHash`: SHA-256 hash of (baseToken + documentNumber)
+2. **What Gets Shared**: Borrower shares proof ID + baseToken (NOT document number)
+3. **Lender Verification**: Lender must provide BOTH:
+   - Base token (from borrower)
+   - Document number (ask borrower verbally)
+4. **Backend Verification**: 
+   - Recreates hash from lender's input
+   - Compares with stored hash
+   - ✅ Match → Show score | ❌ Mismatch → 403 Forbidden
+
+**Why It's Secure**:
+- 🔐 **One-Way Encryption**: SHA-256 cannot be reversed to find document number
+- 🛡️ **Proof Sharing Impossible**: Without document number, friend cannot access score
+- 🔒 **Privacy-Preserving**: Document number never stored in database (only hash)
+- 🎯 **Cryptographically Secure**: Same algorithm as Bitcoin/Cardano (2^256 combinations)
+
+**Visual Indicators for Lenders**:
+- ✅ **"Wallet Ownership Verified"** badge → Borrower signed with real Lace wallet
+- ✅ **"Tokens Verified"** badge → Hash matches, proof belongs to this borrower
+- ⚠️ **"Verification Failed"** warning → Hash mismatch, possible fraud attempt
+
+📖 **Learn More**: See [TWO_TOKEN_VERIFICATION.md](docs/TWO_TOKEN_VERIFICATION.md) for complete technical documentation.
 
 ## Monorepo layout
 

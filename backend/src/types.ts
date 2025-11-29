@@ -26,6 +26,8 @@ export type ScoreRequest = {
   did?: string;
   proofs: Array<{ id: string; hash: string; expiresAt: string }>;
   verifiedDocuments?: VerifiedDocument[];
+  baseToken?: string; // NEW: Base token for lender
+  verificationHash?: string; // NEW: Hash of base token + document number
   aggregates: {
     incomeStability: number;
     repaymentConsistency: number;
@@ -51,5 +53,8 @@ export type ScoreResponse = ScoreComputation & {
     expiresAt: string;
     txHash?: string;
     publicState: MidnightPublicState;
+    walletSignature?: string; // Cryptographic proof of wallet ownership
+    walletAddress?: string;   // Verified wallet address
+    verificationHash?: string;  // NEW: Hash for two-token verification
   };
 };

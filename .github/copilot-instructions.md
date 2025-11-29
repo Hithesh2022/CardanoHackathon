@@ -16,4 +16,6 @@
 
 - [x] Implement Wallet Verification (Midnight blockchain + Lace wallet integration)
 
-- [x] Ensure Documentation is Complete (README + this file updated)
+- [x] Implement Two-Token Hash-Based Verification System (SHA-256 anti-fraud protection)
+
+- [x] Ensure Documentation is Complete (README + TWO_TOKEN_VERIFICATION.md + TWO_TOKEN_TEST_GUIDE.md updated)
