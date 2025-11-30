@@ -1,0 +1,40 @@
+version: "3.9"
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: atlascred-backend
+    environment:
+      - PORT=4000
+      - NODE_ENV=production
+      - MIDNIGHT_CONTRACT_ADDRESS=
+      - MIDNIGHT_PROOF_SERVER=
+      - MIDNIGHT_RPC=
+      - MASUMI_AGENT_URL=http://masumi:8000
+      - MASUMI_AGENT_KEY=demo-key
+    ports:
+      - "4000:4000"
+    depends_on:
+      - masumi
+    command: ["npm","run","start"]
+
+  masumi:
+    build:
+      context: ./agents/masumi-agent
+      dockerfile: Dockerfile
+    container_name: masumi-agent
+    environment:
+      - PORT=8000
+      - ENV=production
+    ports:
+      - "8000:8000"
+    command: ["uvicorn","main:app","--host","0.0.0.0","--port","8000"]
+
+  # Proof server commented out - backend uses local spoof fallback
+  # Uncomment when you have GHCR access with GitHub PAT
+  # proof:
+  #   image: ghcr.io/midnight-network/midnight-proof-server:latest
+  #   container_name: midnight-proof-server
+  #   ports:
+  #     - "8080:8080"

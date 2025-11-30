@@ -12,7 +12,29 @@ import type { ScoreRequest, ScoreResponse } from './types.js';
 
 const app = express();
 const logger = pino({ name: 'atlascred-api' });
-app.use(cors());
+
+// CORS: Allow both local dev and production frontend
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://atlascred-frontend.onrender.com',
+  process.env.FRONTEND_URL // Set this in Docker env if custom domain
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.some(allowed => allowed && origin.startsWith(allowed))) {
+      callback(null, true);
+    } else {
+      logger.warn({ origin }, 'CORS blocked origin');
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
+
 app.use(express.json({ limit: '1mb' }));
 
 const streams = new Map<string, express.Response>();
