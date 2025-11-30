@@ -477,16 +477,19 @@ app.post('/payments/spoof', async (req, res) => {
 
     if (!resp.ok) {
       const txt = await resp.text();
-      logger.error({ status: resp.status, body: txt }, 'Proof server spoof request failed');
-      return res.status(502).json({ error: 'Proof server spoof failed' });
+      logger.warn({ status: resp.status, body: txt }, 'Proof server spoof endpoint unavailable, generating local spoof');
+      const localTx = 'spoof_' + crypto.randomBytes(32).toString('hex');
+      return res.json({ txHash: localTx, amount, purpose, fallback: true });
     }
 
     const data = await resp.json() as { txHash?: string };
     if (!data.txHash) {
-      return res.status(500).json({ error: 'Spoof did not return txHash' });
+      const localTx = 'spoof_' + crypto.randomBytes(32).toString('hex');
+      logger.warn({ body: data }, 'Proof server spoof missing txHash, using local spoof');
+      return res.json({ txHash: localTx, amount, purpose, fallback: true });
     }
 
-    res.json({ txHash: data.txHash, amount, purpose });
+    res.json({ txHash: data.txHash, amount, purpose, fallback: false });
   } catch (error) {
     logger.error({ error }, 'Spoof payment request failed');
     res.status(500).json({ error: 'Internal error' });
