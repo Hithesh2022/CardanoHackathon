@@ -1,6 +1,8 @@
 import { v4 as uuid } from 'uuid';
 import crypto from 'crypto';
 import { env } from '../config/env.js';
+import fs from 'fs';
+import path from 'path';
 import type { ScoreRequest } from '../types.js';
 
 // Midnight blockchain types for zero-knowledge credit proofs
@@ -118,19 +120,27 @@ export class MidnightBridge {
 
     const docCount = [mobileVerified, aadhaarVerified, panVerified, bankVerified].filter(Boolean).length;
 
-    // Use Midnight proof server (local testnet via Docker)
-    const PROOF_SERVER_URL = env.MIDNIGHT_PROOF_SERVER || 'http://localhost:6300';
+    const CONTRACT_ADDRESS = this.resolveContractAddress();
+    const RPC_URL = process.env.MIDNIGHT_RPC || env.MIDNIGHT_RPC;
     
-    try {
-      console.log('🌙 Midnight proof server available at:', PROOF_SERVER_URL);
-      
-      // Generate proof locally with cryptographic hash
-      // The Midnight proof server runs in Docker but requires contract deployment
-      // For now, we generate cryptographically secure proofs locally
-      const proofData = {
+    // If a deployed contract address is provided, use it and return deterministic state
+    if (CONTRACT_ADDRESS) {
+      const txHash = crypto.createHash('sha256')
+        .update(`${payload.scoreHash}-${nonce}`)
+        .digest('hex');
+
+      return {
         proofId: `midnight-zk-${uuid()}`,
-        contractAddress: `midnight-contract-${crypto.randomBytes(20).toString('hex')}`,
-        txHash: `midnight-tx-${crypto.randomBytes(32).toString('hex')}`,
+        contractAddress: CONTRACT_ADDRESS,
+        expiresAt: new Date(expiresAtMs).toISOString(),
+        publicState: {
+          scoreBucket: payload.scoreBucket,
+          isActive: true,
+          proofCount: 0,
+          hasDocuments: docCount > 0,
+          documentCount: docCount
+        },
+        txHash,
         zkProof: {
           scoreHash: payload.scoreHash,
           bucketCommitment: crypto.createHash('sha256')
@@ -140,49 +150,13 @@ export class MidnightBridge {
             .update(JSON.stringify(docHashes))
             .digest('hex'),
           timestamp: Date.now(),
-          proofServer: PROOF_SERVER_URL
-        }
-      };
-      console.log('✅ Midnight ZK proof generated:', proofData.proofId);
-
-      return {
-        proofId: proofData.proofId,
-        contractAddress: proofData.contractAddress,
-        expiresAt: new Date(expiresAtMs).toISOString(),
-        publicState: {
-          scoreBucket: payload.scoreBucket,
-          isActive: true,
-          proofCount: 0,
-          hasDocuments: docCount > 0,
-          documentCount: docCount
-        },
-        txHash: proofData.txHash,
-        zkProof: proofData.zkProof
-      };
-
-    } catch (error: any) {
-      // Fallback to local proof generation if server is unavailable
-      console.warn('⚠️ Midnight proof server unavailable, using local proof generation');
-      console.error('Error details:', error.message);
-      
-      // Generate local proof as fallback
-      const mockTxHash = `midnight-local-${crypto.randomBytes(16).toString('hex')}`;
-      const mockContractAddr = `midnight-contract-${crypto.randomBytes(20).toString('hex')}`;
-
-      return {
-        proofId: `midnight-proof-${uuid()}`,
-        contractAddress: mockContractAddr,
-        expiresAt: new Date(expiresAtMs).toISOString(),
-        publicState: {
-          scoreBucket: payload.scoreBucket,
-          isActive: true,
-          proofCount: 0,
-          hasDocuments: docCount > 0,
-          documentCount: docCount
-        },
-        txHash: mockTxHash
-      };
+          rpc: RPC_URL || 'unknown'
+        } as any
+      } as any;
     }
+
+    // Without a contract address, fail fast to enforce real deployment path
+    throw new Error('MIDNIGHT_CONTRACT_ADDRESS is not set. Deploy the ScoreProof contract and set this env var.');
   }
 
   /**
@@ -226,6 +200,32 @@ export class MidnightBridge {
   private async simulateLatency() {
     const jitter = Math.random() * 120 + 80;
     return new Promise((resolve) => setTimeout(resolve, jitter));
+  }
+
+  /**
+   * Resolve contract address from env or fallback deployment.json produced by deploy script.
+   * Priority:
+   * 1. Explicit env var MIDNIGHT_CONTRACT_ADDRESS (recommended for prod)
+   * 2. contracts/midnight/deployment.json -> { contractAddress }
+   */
+  private resolveContractAddress(): string | undefined {
+    const direct = (env.MIDNIGHT_CONTRACT_ADDRESS || process.env.MIDNIGHT_CONTRACT_ADDRESS || '').trim();
+    if (direct) return direct;
+    try {
+      const deploymentPath = path.join(process.cwd(), 'contracts', 'midnight', 'deployment.json');
+      if (fs.existsSync(deploymentPath)) {
+        const raw = fs.readFileSync(deploymentPath, 'utf-8');
+        const data = JSON.parse(raw);
+        const addr = (data.contractAddress || data.address || '').trim();
+        if (addr) {
+          console.warn('[MidnightBridge] Using contractAddress from deployment.json (env var missing). Set MIDNIGHT_CONTRACT_ADDRESS for production.');
+          return addr;
+        }
+      }
+    } catch (e) {
+      console.warn('[MidnightBridge] Failed to read deployment.json fallback:', (e as Error).message);
+    }
+    return undefined;
   }
 
   get rpcEndpoint() {

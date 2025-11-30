@@ -205,6 +205,41 @@ Lender NEVER learns: 782 or any other details
 5. **Add Midnight Wallet Connector** to frontend (MidnightWallet provider)
 6. **Test End-to-End** on Midnight testnet
 
+### Contract Address Resolution
+
+The backend now resolves the Minokawa contract address using the following priority order:
+
+1. `MIDNIGHT_CONTRACT_ADDRESS` environment variable (authoritative; always set this in any deployed environment).
+2. Fallback file: `contracts/midnight/deployment.json` written by the deploy script (`npm run deploy` in `contracts/midnight`). It must contain `{ "contractAddress": "midnight1..." }`.
+
+If the env var is missing but the file exists, the backend logs:
+
+```
+[MidnightBridge] Using contractAddress from deployment.json (env var missing). Set MIDNIGHT_CONTRACT_ADDRESS for production.
+```
+
+If neither is found, score proof initialization throws:
+
+```
+MIDNIGHT_CONTRACT_ADDRESS is not set. Deploy the ScoreProof contract and set this env var.
+```
+
+Recommended deployment steps:
+```
+cd contracts/midnight
+npm run compile
+npm run build
+npm run deploy   # creates deployment.json
+setx MIDNIGHT_CONTRACT_ADDRESS <address-from-deployment.json>
+```
+
+On Windows PowerShell you can set the variable temporarily for a session with:
+```
+$env:MIDNIGHT_CONTRACT_ADDRESS = "midnight1xyz..."
+```
+
+Verify backend picks it up by calling the score initialization endpoint and checking the `contractAddress` in the returned proof.
+
 ## Technical Stack
 
 | Layer | Technology |
